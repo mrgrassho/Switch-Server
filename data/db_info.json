@@ -1,0 +1,14 @@
+{
+  "mysql": {
+    "": [""]
+  },
+
+  "firebird": {
+    "facturacion.fdb": ["factura", "detalle", "producto"]
+  },
+
+  "postgresql": {
+     "personal.gdb": ["empleado"],
+     "personal_limpieza.fdb": ["turnos"]
+  }
+}

@@ -9,10 +9,12 @@
 #include <jansson.h>
 
 #define IP_SERVER "127.0.0.1"
-#define PORT_SERVER "23232"
+#define PORT_SERVER 23232
+#define BUF_SIZE 1024
 
 void usage() {
-  printf("USO:\tswitch_client <nombre_de_bd> <query_sql>");
+  printf("USO:\tswitch_client <nombre_de_bd> <query_sql> [IP_SERVER] [PORT]\
+          \n\tIP SERVER, default 127.0.0.1\n\tPORT, default 23232");
 }
 
 void print_json(json_t * obj) {
@@ -51,18 +53,23 @@ int main(int argc, char const *argv[]) {
   json_t * obj_query;
   json_t * obj_table;
   json_error_t err;
-  char * data_send;
-  char * data_recv;
+  char data_send[BUF_SIZE] = {};
+  char data_recv[BUF_SIZE] = {};
 
   obj_query = json_pack("{s:s,s:s}", "db", argv[1], "query", argv[2]);
-  data_send = json_dumps(obj_query, 0);
-  printf("%s\n", data_send);
+  //json_dumpd( obj_query, data_send, strlen(data_send), 0);
+  printf("%s\n", json_dumps(obj_query, 0));
   // Estrucuturas de SOCKETS
   int sd;
   struct sockaddr_in pin;
   pin.sin_family = AF_INET;
-  pin.sin_addr.s_addr = inet_addr(IP_SERVER);
-  pin.sin_port = htons((uint16_t) PORT_SERVER);
+  if (5 == argc){
+    pin.sin_addr.s_addr = inet_addr(argv[3]);
+    pin.sin_port = htons(atoi(argv[4]));
+  } else {
+    pin.sin_addr.s_addr = inet_addr(IP_SERVER);
+    pin.sin_port = htons(PORT_SERVER);
+  }
   bzero(&pin.sin_zero, sizeof(pin.sin_zero));
   sd = socket(AF_INET,SOCK_STREAM,0);
   if (sd == -1){
@@ -74,24 +81,27 @@ int main(int argc, char const *argv[]) {
     exit(1);
   }
   // escribimos en el socket
-  write(sd, data_send, strlen(data_send));
+  json_dumpfd(obj_query, sd, 0);
+  //write(sd, data_send, strlen(data_send));
   sleep(1);
   // String deben terminar en NULL
-  int l = read(sd, data_recv, strlen(data_recv));
-  data_recv[l]='\0';
+  bzero(data_recv, BUF_SIZE);
+  int l = read(sd, data_recv, sizeof(data_recv));
+  if (l == -1) {
+    printf("ERROR en el read()");
+    exit(EXIT_FAILURE);
+  }
   //  ALTERNATIVA: FOR SOCKETS USE:
   //  obj_table = json_loadfd(sd, 0, &err);
-  obj_table = json_loads(data_recv, 0, &err);
+  obj_table = json_loads(data_recv, JSON_DISABLE_EOF_CHECK, &err);
   if(!obj_table) {
-    printf("ERROR al decodear el objecto: %i\n", json_error_code(&err));
+    printf("[!] ERROR al decodear el objecto. ERROR MSJ: %s\n", err.text);
     exit(1);
   }
   print_json(obj_table);
 
   json_decref(obj_query);
   json_decref(obj_table);
-  free(data_send);
-  free(data_recv);
   close(sd);
   return 0;
 }
