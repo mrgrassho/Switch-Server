@@ -1,3 +1,4 @@
+# @Author Victorio Scafati 
 # COMMANDOS PARA COMPILAR switch_server
 
 gcc mysql_lib.c -o mysql_lib.o -Wall -g -c -L/usr/lib/mysql -lmysqlclient
