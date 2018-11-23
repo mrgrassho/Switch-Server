@@ -10,8 +10,8 @@
 #include <jansson.h>
 
 #include "error_conn.h"
-#include "switch_server.h"
-//#include "postgresql_lib.h"
+#include "utils_server.h"
+#include "postgresql_lib.h"
 //#include "mysql_lib.h"
 
 #define EXPECT_GE(i, e, ...) \
@@ -67,90 +67,100 @@ void usage() {
   printf("USO:\tswitch_server [--debug]\n");
 }
 
-// DEBUG: TEST func
-json_t * strtojson(char * str)
+void strtojson(char * str, json_t * array)
 {
-    json_t * array = json_array();
     json_auto_t * row = json_array();
-    char * tmp;
+    char tmp[STR_SIZE] = "";
     char x;
-    tmp = malloc(STR_SIZE * sizeof(int) + 1);
-    tmp[STR_SIZE] = '\0';
+    memset(tmp,'\0',STR_SIZE);
+    char strcounter[16];
+    int counter = 0;
+    char aux[2];
     while ( (x = *str++) != '\0')
     {
         if (SEP_COL[0] == x)
         {
             json_auto_t * s = json_string(tmp);
-            json_array_append_new(row, s);
-            tmp = "";
+            json_array_append(row, s);
+            memset(tmp,0x0,STR_SIZE);
         }
         else if (SEP_ROW[0] == x)
         {
-            json_array_append(array, row);
+            json_auto_t * w = json_string(tmp);
+            json_array_append(row, w);
+            json_array_append(array, json_copy(row));
             json_array_clear(row);
+            memset(tmp,'\0',STR_SIZE);
         }
-        else if (0x20 == x)
-        { // IGNORAMOS ESPACIOS
-            continue;
+        else
+        {
+            sprintf(aux, "%c", x);
+            strcat(tmp, aux);
         }
-        char aux[2];
-        aux[0] = x;
-        aux[1] = '\0';
-        strcat(tmp, aux);
     }
-    return array;
 }
 
-void lookup_engine(char* dbname, const char* engine)
+void lookup_engine(char* dbname, char* engine)
 {
     json_error_t json_err;
     json_auto_t * obj;
     FILE* fp = fopen(META_PATH, "r");
     obj = json_loadf(fp, 0, &json_err);
+    fclose(fp);
     const char *key;
     json_auto_t *value;
-    json_object_foreach(obj, key, value) {
+    json_object_foreach(obj, key, value)
+    {
         const char *key_2;
         json_auto_t *value_2;
         json_object_foreach(value, key_2, value_2)
         {
-            if (json_object_get(value_2, dbname) != NULL)
+            if (strcmp(key_2, dbname) == 0)
             {
-                engine = json_string_value(value);
+                memcpy(engine, key, sizeof(engine));
                 break;
             }
         }
     }
+
 }
 
-error_connection_t process_query(char p[], char* response)
+error_connection_t process_query(char* p, char* response)
 {
     json_error_t json_err;
     json_auto_t * q;
     error_connection_t err;
     q = json_loads(p, 0, &json_err);
-    if(!q) goto error_pq;
-    char* dbname = json_dumps(json_object_get(q, "db"), 0);
-    char* qry = json_dumps(json_object_get(q, "query"), 0);
-    char* engine = "";
+    if (NULL == q) goto error_pq;
+    char* dbname = (char *)json_string_value(json_object_get(q, "db"));
+    char* qry = (char *)json_string_value(json_object_get(q, "query"));
+    char* engine = malloc(10);
     lookup_engine(dbname, engine);
-  /* TODO; switch (engine[0])
+    switch (engine[0])
     {
-        case 'p': err = query_sw_postgresql(dbname, qry, response);
-        //case 'm': err = query_sw_mysql(dbname, q, &response);
+        case 'p': {
+          err = query_sw_postgresql(dbname, qry, response);
+          break;
+        }
+        case 'm': {
+          err = query_sw_mysql(dbname, qry, &response);
+          break;
+        }
         // TODO Firebird
-    } */
+        default: memcpy(response, "No such DB.\t\n", 12);
+    }
+    free(engine);
     return err;
     error_pq:
-        printf("ERROR al decodear el objecto: %i\n", json_error_code(&json_err));
+        printf("ERROR al decodear el objecto: ERROR MSJ: %s\n", json_err.text);
         exit(1);
 }
 
 json_t* format_response(json_t* raw_json){
     json_t* obj = json_object();
     json_object_set(obj, "status", json_string("OK"));
-    json_object_set(obj, "msj", json_string(""));
-    json_object_set(obj, "data", raw_json);
+    json_object_set(obj, "msj", json_string("-"));
+    json_object_set(obj, "data", json_deep_copy(raw_json));
     return obj;
 }
 
@@ -161,32 +171,44 @@ void * query_handler(void *p_sockfd)
     char response[BUF_SIZE] = {};
     char raw_json[BUF_SIZE] = {};
     int c_sockfd = *(int *) p_sockfd;
-    #ifdef DEBUG_MODE
-    printf("Query Handler creado.\nPID = %s\n", "1000");
-    #endif
-    // DEBUG
+    /*/ DEBUG
     json_error_t json_err;
     FILE* fp = fopen("config_test.json", "r");
-    json_auto_t* obj_query = json_loadf(fp, 0, &json_err);
+    obj_query = json_loadf(fp, 0, &json_err);
     // == agregar validacion de json_err
     fclose(fp);
-    //
+    */
     while(1)
     {
         bzero(query, sizeof(query));
         // [+] Servidor espera codigo SQL
-        ret = recv(c_sockfd, query, sizeof(query) - 1, 0);
+        ret = read(c_sockfd, query, sizeof(query) - 1);
         if (ret < 0) break;
-        // TODO: [+] Servidor procesa query_sql
-        //process_query(query, response);
+        printf("%s\n", query);
+        // [+] Servidor procesa query_sql
+        process_query(query, response);
         // [+] Convierte de string a JSON
         // [+] Se da formato a la response
-
-        //json_auto_t * obj_query = format_response(strtojson(response));
-        memcpy(raw_json, json_dumps(obj_query, 0), BUF_SIZE);
-        // [+] Servidor envia respuesta
-        if (send(c_sockfd, raw_json, sizeof(raw_json) - 1, 0) < 0)
+        json_t * array = json_array();
+        strtojson(response, array);
+        json_auto_t * obj_query = format_response(array);
+        /*size_t size = json_dumpb(obj_query, NULL, 0, 0);
+        if (size == 0){
+            printf("objecto json vacio\n");
+            exit(1);
+        }
+        char * data_send = malloc(size);
+        json_dumpb(obj_query, data_send, size, 0);*/
+        // [+] Servidor envia respuesta - respuesta embebida
+        char * data_send = malloc(BUF_SIZE);
+        memcpy(data_send, json_dumps(obj_query, 0), BUF_SIZE);
+        printf("%s %lu\n",data_send, strlen(data_send) );
+        if ( write(c_sockfd, data_send, strlen(data_send)) < 0 )
             printf("ERROR al escribir en el socket\n");
+        free(data_send);
+        memset(query, 0x0, BUF_SIZE);
+        memset(response, 0x0, BUF_SIZE);
+        memset(raw_json, 0x0, BUF_SIZE);
     }
     if (c_sockfd < 0) close(c_sockfd);
     pthread_exit(NULL);
@@ -234,7 +256,8 @@ void * udpate_metadata()
         char response[BUF_SIZE] = {};
         query_metadata(response);
         // [+] Se castean el char* retornado a JSON
-        json_auto_t * obj_query = strtojson(response);
+        json_auto_t * obj_query;
+        strtojson(response, obj_query);
         // [+] Se guardan los resultados en 'data/db_info.json'
         FILE* fp = fopen(META_PATH, "w+");
         json_dumpf(obj_query,fp, 0);
