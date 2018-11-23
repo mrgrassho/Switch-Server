@@ -1,5 +1,11 @@
 ###### @Author Victorio Scafati
 
+# Switch Server Architecture
+
+<dl>
+<img src="https://github.com/mrgrassho/Switch-Server/blob/master/SWS_Diagram.png" alt="SWS_Diagram" class="center">
+</dl>
+
 #### Commands to compile switch_server:
 ```
 gcc mysql_lib.c -o mysql_lib.o -Wall -g -c -L/usr/lib/mysql -lmysqlclient
